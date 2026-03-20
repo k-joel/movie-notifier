@@ -1,0 +1,58 @@
+# Movie Notifier Configuration
+# =============================
+
+# TMDB API Configuration
+tmdb:
+  api_key: "YOUR_TMDB_API_KEY_HERE"  # Get from https://www.themoviedb.org/settings/api
+  base_url: "https://api.themoviedb.org/3"
+  
+# Email Configuration
+email:
+  smtp_server: "smtp.gmail.com"  # Change based on your email provider
+  smtp_port: 587
+  smtp_username: "YOUR_EMAIL@gmail.com"
+  smtp_password: "YOUR_APP_PASSWORD"  # Use app-specific password for Gmail
+  from_email: "YOUR_EMAIL@gmail.com"
+  to_email: "YOUR_NOTIFICATION_EMAIL@gmail.com"
+  
+# Notification Settings
+notifications:
+  check_interval_days: 1  # How often to check for new releases (in days)
+  look_ahead_days: 30     # How many days into the future to check for upcoming releases
+  include_upcoming: true  # Include movies that haven't been released yet
+  include_now_playing: true  # Include movies currently in theaters
+  
+# Tracked People (Actors & Directors)
+# Add TMDB person IDs here (find them at https://www.themoviedb.org/person)
+tracked_people:
+  - id: 287  # Brad Pitt
+    name: "Brad Pitt"
+    type: "actor"
+    notify_for: ["acting"]  # acting, directing, or both
+    
+  - id: 1136406  # Tom Holland
+    name: "Tom Holland"
+    type: "actor"
+    notify_for: ["acting"]
+    
+  - id: 525  # Christopher Nolan
+    name: "Christopher Nolan"
+    type: "director"
+    notify_for: ["directing"]
+    
+  - id: 1032  # Michelle Yeoh
+    name: "Michelle Yeoh"
+    type: "actor"
+    notify_for: ["acting"]
+    
+  - id: 138  # James Cameron
+    name: "James Cameron"
+    type: "director"
+    notify_for: ["directing"]
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  file: "logs/movie_notifier.log"
+  max_size_mb: 10
+  backup_count: 5
