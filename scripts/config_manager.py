@@ -9,7 +9,8 @@ import os
 import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from datetime import datetime
+
+from utils import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -109,14 +110,8 @@ class ConfigManager:
         Args:
             config_path: Path to configuration file (relative to project root)
         """
-        # Determine project root (parent of scripts directory)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # go up one level from scripts
-        project_root = os.path.dirname(script_dir)
-
-        # If config_path is relative, make it relative to project root
         if not os.path.isabs(config_path):
-            config_path = os.path.join(project_root, config_path)
+            config_path = os.path.join(get_project_root(), config_path)
 
         self.config_path = config_path
         self.config_data: Optional[Dict] = None
@@ -402,7 +397,7 @@ def interactive_setup() -> bool:
 
     level = prompt_with_default(
         "Enter logging level", logging_defaults['level'])
-    file = prompt_with_default(
+    log_file = prompt_with_default(
         "Enter log file path", logging_defaults['file'])
     max_size_mb = prompt_with_default(
         "Enter max log size (MB)", logging_defaults['max_size_mb'], int)
@@ -412,7 +407,7 @@ def interactive_setup() -> bool:
     if 'logging' not in manager.config_data:
         manager.config_data['logging'] = {}
     manager.config_data['logging']['level'] = level
-    manager.config_data['logging']['file'] = file
+    manager.config_data['logging']['file'] = log_file
     manager.config_data['logging']['max_size_mb'] = max_size_mb
     manager.config_data['logging']['backup_count'] = backup_count
 

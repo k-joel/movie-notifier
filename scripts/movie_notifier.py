@@ -13,9 +13,9 @@ import logging
 import logging.handlers
 import sys
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import time
 
 
 class MovieNotifier:
@@ -123,7 +123,7 @@ class MovieNotifier:
 
             # Check for required read access token
             tmdb_config = self.config_manager.get_tmdb_config()
-            if not tmdb_config or not tmdb_config.read_access_token or tmdb_config.read_access_token == "YOUR_TMDB_API_KEY_HERE":
+            if not tmdb_config or not tmdb_config.read_access_token or tmdb_config.read_access_token == "YOUR_TMDB_READ_ACCESS_TOKEN":
                 logging.error(
                     "TMDB read access token not configured. Please update config/config.yaml")
                 logging.error(
@@ -190,65 +190,46 @@ class MovieNotifier:
 
         return results
 
+    def _filter_movies_by_credit_type(self, movies: List[Dict], person: PersonConfig) -> List[Dict]:
+        """Filter movies based on credit type and notification preferences."""
+        filtered = []
+        for movie in movies:
+            credit_type = movie.get("credit_type", "")
+            if (credit_type == "cast" and "acting" in person.notify_for) or \
+               (credit_type == "crew" and "directing" in person.notify_for):
+                if not self.people_manager.is_movie_notified(person.id, movie["id"]):
+                    filtered.append(movie)
+        return filtered
+
     def check_person_movies(self, person: PersonConfig) -> Dict[str, List[Dict]]:
-        """
-        Check for new movies for a specific person
-
-        Args:
-            person: Person configuration
-
-        Returns:
-            Dictionary with movie lists by type
-        """
+        """Check for new movies for a specific person."""
         if self.tmdb_client is None:
-            logging.error("TMDB client not initialized. Call initialize_components() first.")
+            logging.error(
+                "TMDB client not initialized. Call initialize_components() first.")
             return {"new_release": [], "upcoming": [], "now_playing": []}
 
-        movies_by_type = {
-            "new_release": [],
-            "upcoming": [],
-            "now_playing": []
-        }
+        movies_by_type = {"new_release": [], "upcoming": [], "now_playing": []}
 
         try:
-            # Get notification config
             notification_config = self.config_manager.get_notification_config()
             if not notification_config:
                 return movies_by_type
 
-            # Get recent movies (released in the last X days)
             if "acting" in person.notify_for or "directing" in person.notify_for:
                 recent_movies = self.tmdb_client.get_recent_movies_for_person(
                     person.id,
                     days_back=notification_config.check_interval_days
                 )
+                movies_by_type["new_release"] = self._filter_movies_by_credit_type(
+                    recent_movies, person)
 
-                for movie in recent_movies:
-                    # Filter by credit type
-                    credit_type = movie.get("credit_type", "")
-                    if (credit_type == "cast" and "acting" in person.notify_for) or \
-                       (credit_type == "crew" and "directing" in person.notify_for):
-
-                        # Check if we've already notified about this movie
-                        if not self.people_manager.is_movie_notified(person.id, movie["id"]):
-                            movies_by_type["new_release"].append(movie)
-
-            # Get upcoming movies
-            if notification_config.include_upcoming:
-                upcoming_movies = self.tmdb_client.get_upcoming_movies_for_person(
-                    person.id,
-                    days_ahead=notification_config.look_ahead_days
-                )
-
-                for movie in upcoming_movies:
-                    # Filter by credit type
-                    credit_type = movie.get("credit_type", "")
-                    if (credit_type == "cast" and "acting" in person.notify_for) or \
-                       (credit_type == "crew" and "directing" in person.notify_for):
-
-                        # Check if we've already notified about this movie
-                        if not self.people_manager.is_movie_notified(person.id, movie["id"]):
-                            movies_by_type["upcoming"].append(movie)
+                if notification_config.include_upcoming:
+                    upcoming_movies = self.tmdb_client.get_upcoming_movies_for_person(
+                        person.id,
+                        days_ahead=notification_config.look_ahead_days
+                    )
+                    movies_by_type["upcoming"] = self._filter_movies_by_credit_type(
+                        upcoming_movies, person)
 
             logging.info(f"Found {len(movies_by_type['new_release'])} new releases, "
                          f"{len(movies_by_type['upcoming'])} upcoming movies for {person.name}")
@@ -344,7 +325,8 @@ class MovieNotifier:
                 results = self.send_console_notification(all_notifications)
             else:
                 if self.email_notifier is None:
-                    logging.error("Email notifier not initialized. Call initialize_components() first.")
+                    logging.error(
+                        "Email notifier not initialized. Call initialize_components() first.")
                     return False
                 results = self.email_notifier.send_batch_notifications(
                     all_notifications)
@@ -384,14 +366,17 @@ class MovieNotifier:
                             If False, use built-in sleep loop.
         """
         if use_os_scheduler:
-            script_path = os.path.join(os.path.dirname(__file__), "movie_notifier.py")
+            script_path = os.path.join(
+                os.path.dirname(__file__), "movie_notifier.py")
             success = setup_scheduled_task(interval_hours, script_path)
             if success:
                 logging.info(
                     f"Task scheduled using OS scheduler. Will run every {interval_hours} hours.")
-                logging.info("The scheduled task will run independently. You can close this process.")
+                logging.info(
+                    "The scheduled task will run independently. You can close this process.")
             else:
-                logging.warning("Failed to setup OS scheduler, falling back to built-in loop")
+                logging.warning(
+                    "Failed to setup OS scheduler, falling back to built-in loop")
                 use_os_scheduler = False
             return
 
@@ -412,6 +397,7 @@ class MovieNotifier:
             logging.info("Movie notifier stopped by user")
         except Exception as e:
             logging.error(f"Error in scheduled run: {e}")
+
 
 def main():
     """Main entry point"""
@@ -447,7 +433,8 @@ def main():
     if args.once:
         notifier.run_once()
     elif args.schedule:
-        notifier.run_scheduled(args.interval, use_os_scheduler=args.native_schedule)
+        notifier.run_scheduled(
+            args.interval, use_os_scheduler=args.native_schedule)
     else:
         # Default: run once
         notifier.run_once()

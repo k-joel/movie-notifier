@@ -8,7 +8,6 @@ import requests
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-import time
 
 logger = logging.getLogger(__name__)
 

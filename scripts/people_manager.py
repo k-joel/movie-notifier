@@ -12,6 +12,8 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from utils import get_project_root
+
 logger = logging.getLogger(__name__)
 
 # Forward references for type hints
@@ -50,14 +52,8 @@ class PeopleManager:
         Args:
             people_path: Path to people configuration file
         """
-        # Determine project root (parent of scripts directory)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # go up one level from scripts
-        project_root = os.path.dirname(script_dir)
-
-        # If people_path is relative, make it relative to project root
         if not os.path.isabs(people_path):
-            people_path = os.path.join(project_root, people_path)
+            people_path = os.path.join(get_project_root(), people_path)
 
         self.people_path = people_path
         self.people_data: Optional[Dict] = None

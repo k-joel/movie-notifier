@@ -6,6 +6,7 @@ Handles sending email notifications for new movie releases
 
 import smtplib
 import logging
+import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Optional
@@ -48,10 +49,8 @@ class EmailNotifier:
 
             # Create plain text version if not provided
             if body_text is None:
-                # Simple HTML to text conversion
-                import re
                 body_text = re.sub(r'<[^>]+>', '', body_html)
-                body_text = re.sub(r'\s*', '', body_text)
+                body_text = re.sub(r'\s+', ' ', body_text)
 
             # Attach both HTML and plain text versions
             part1 = MIMEText(body_text, 'plain')
@@ -298,8 +297,8 @@ def send_test_email(config_path="config/config.yaml"):
     # Create test email content
     test_subject = "🎬 Movie Notifier - Test Email"
 
-    # Escape CSS curly braces by doubling them
-    test_html_body = """
+    test_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    test_html_body = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -326,9 +325,9 @@ def send_test_email(config_path="config/config.yaml"):
         <div class="info">
             <h3>Configuration Details:</h3>
             <ul>
-                <li><strong>SMTP Server:</strong> {smtp_server}:{smtp_port}</li>
-                <li><strong>From Email:</strong> {from_email}</li>
-                <li><strong>To Email:</strong> {to_email}</li>
+                <li><strong>SMTP Server:</strong> {email_config.smtp_server}:{email_config.smtp_port}</li>
+                <li><strong>From Email:</strong> {email_config.from_email}</li>
+                <li><strong>To Email:</strong> {email_config.to_email}</li>
                 <li><strong>Test Time:</strong> {test_time}</li>
             </ul>
         </div>
@@ -339,15 +338,9 @@ def send_test_email(config_path="config/config.yaml"):
         </div>
     </body>
     </html>
-    """.format(
-        smtp_server=email_config.smtp_server,
-        smtp_port=email_config.smtp_port,
-        from_email=email_config.from_email,
-        to_email=email_config.to_email,
-        test_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    )
+    """
 
-    test_text_body = """
+    test_text_body = f"""
     Movie Notifier - Email Configuration Test
     =========================================
     
@@ -357,20 +350,14 @@ def send_test_email(config_path="config/config.yaml"):
     If you're receiving this email, your Movie Notifier email settings are properly configured.
     
     Configuration Details:
-    - SMTP Server: {smtp_server}:{smtp_port}
-    - From Email: {from_email}
-    - To Email: {to_email}
+    - SMTP Server: {email_config.smtp_server}:{email_config.smtp_port}
+    - From Email: {email_config.from_email}
+    - To Email: {email_config.to_email}
     - Test Time: {test_time}
     
     This test email was sent by Movie Notifier on {test_time}
     You can now receive movie notifications for your tracked actors and directors.
-    """.format(
-        smtp_server=email_config.smtp_server,
-        smtp_port=email_config.smtp_port,
-        from_email=email_config.from_email,
-        to_email=email_config.to_email,
-        test_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    )
+    """
 
     print("Sending test email...")
     try:
