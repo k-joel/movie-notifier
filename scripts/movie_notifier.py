@@ -14,25 +14,27 @@ import logging.handlers
 import sys
 import os
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 import time
 
 
 class MovieNotifier:
     """Main orchestrator for movie notifications"""
 
-    def __init__(self, config_path: str = "config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml", console_mode: bool = False):
         """
         Initialize movie notifier
 
         Args:
             config_path: Path to configuration file
+            console_mode: If True, output notifications to console instead of sending emails
         """
         self.config_path = config_path
         self.config_manager = ConfigManager(config_path)
         self.people_manager = PeopleManager("config/people.yaml")
         self.tmdb_client = None
         self.email_notifier = None
+        self.console_mode = console_mode
         self.setup_logging()
 
     def setup_logging(self):
@@ -149,6 +151,45 @@ class MovieNotifier:
             logging.error(f"Error initializing components: {e}")
             return False
 
+    def send_console_notification(self, notifications: List[Dict]) -> Dict[str, bool]:
+        """
+        Send notifications to console instead of email
+
+        Args:
+            notifications: List of notification dictionaries
+
+        Returns:
+            Dictionary with success status for each notification
+        """
+        results = {}
+        for i, notification in enumerate(notifications):
+            try:
+                person_name = notification.get("person_name", "Unknown")
+                movie_type = notification.get("notification_type", "unknown")
+                movies = notification.get("movies", [])
+
+                print("\n" + "=" * 60)
+                print(f"NOTIFICATION #{i + 1}")
+                print(f"Person: {person_name}")
+                print(f"Type: {movie_type}")
+                print(f"Movies ({len(movies)}):")
+                print("-" * 40)
+
+                for movie in movies:
+                    title = movie.get("title", "Unknown Title")
+                    release_date = movie.get("release_date", "Unknown Date")
+                    credit_type = movie.get("credit_type", "")
+                    print(f"  - {title} ({release_date}) [{credit_type}]")
+
+                print("=" * 60 + "\n")
+                results[str(i)] = True
+
+            except Exception as e:
+                logging.error(f"Error sending console notification: {e}")
+                results[str(i)] = False
+
+        return results
+
     def check_person_movies(self, person: PersonConfig) -> Dict[str, List[Dict]]:
         """
         Check for new movies for a specific person
@@ -159,6 +200,10 @@ class MovieNotifier:
         Returns:
             Dictionary with movie lists by type
         """
+        if self.tmdb_client is None:
+            logging.error("TMDB client not initialized. Call initialize_components() first.")
+            return {"new_release": [], "upcoming": [], "now_playing": []}
+
         movies_by_type = {
             "new_release": [],
             "upcoming": [],
@@ -295,8 +340,14 @@ class MovieNotifier:
         # Send notifications
         if all_notifications:
             logging.info(f"Sending {len(all_notifications)} notifications")
-            results = self.email_notifier.send_batch_notifications(
-                all_notifications)
+            if self.console_mode:
+                results = self.send_console_notification(all_notifications)
+            else:
+                if self.email_notifier is None:
+                    logging.error("Email notifier not initialized. Call initialize_components() first.")
+                    return False
+                results = self.email_notifier.send_batch_notifications(
+                    all_notifications)
 
             # Log results
             success_count = sum(1 for success in results.values() if success)
@@ -362,50 +413,6 @@ class MovieNotifier:
         except Exception as e:
             logging.error(f"Error in scheduled run: {e}")
 
-    def test_connection(self) -> bool:
-        """
-        Test connections to TMDB and email server
-
-        Returns:
-            True if all connections successful, False otherwise
-        """
-        logging.info("Testing connections...")
-
-        if not self.initialize_components():
-            return False
-
-        # Test TMDB connection
-        try:
-            test_result = self.tmdb_client.get_now_playing_movies(page=1)
-            if test_result:
-                logging.info("✓ TMDB API connection successful")
-            else:
-                logging.error("✗ TMDB API connection failed")
-                return False
-        except Exception as e:
-            logging.error(f"✗ TMDB API connection error: {e}")
-            return False
-
-        # Test email connection
-        try:
-            test_subject = "Movie Notifier - Connection Test"
-            test_body = "<p>This is a test email from Movie Notifier.</p>"
-            success = self.email_notifier.send_notification(
-                test_subject, test_body, "Test email")
-
-            if success:
-                logging.info("✓ Email connection successful")
-            else:
-                logging.error("✗ Email connection failed")
-                return False
-        except Exception as e:
-            logging.error(f"✗ Email connection error: {e}")
-            return False
-
-        logging.info("✓ All connections tested successfully")
-        return True
-
-
 def main():
     """Main entry point"""
     import argparse
@@ -422,24 +429,22 @@ def main():
                         help="Use OS-native scheduler (cron on Linux, Task Scheduler on Windows)")
     parser.add_argument("--interval", "-i", type=int, default=24,
                         help="Hours between checks when running on schedule")
-    parser.add_argument("--test", "-t", action="store_true",
-                        help="Test connections only")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable verbose logging")
+    parser.add_argument("--console", dest="console", action="store_true",
+                        help="Output notifications to console instead of sending emails")
 
     args = parser.parse_args()
 
     # Create notifier
-    notifier = MovieNotifier(args.config)
+    notifier = MovieNotifier(args.config, console_mode=args.console)
 
     # Set logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Run based on arguments
-    if args.test:
-        notifier.test_connection()
-    elif args.once:
+    if args.once:
         notifier.run_once()
     elif args.schedule:
         notifier.run_scheduled(args.interval, use_os_scheduler=args.native_schedule)

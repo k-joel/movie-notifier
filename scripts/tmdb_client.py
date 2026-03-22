@@ -230,3 +230,52 @@ class TMDBClient:
                             continue
 
         return upcoming_movies
+
+
+def test_connection():
+    """Test TMDB connection when run directly"""
+    import sys
+    import argparse
+    from config_manager import ConfigManager
+
+    parser = argparse.ArgumentParser(description="Test TMDB API connection")
+    parser.add_argument("--config", "-c", default="config/config.yaml",
+                        help="Path to configuration file")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+    config_manager = ConfigManager(args.config)
+    if not config_manager.load_config():
+        logger.error("Failed to load configuration")
+        return
+
+    tmdb_config = config_manager.get_tmdb_config()
+    if not tmdb_config or not tmdb_config.read_access_token:
+        logger.error("TMDB configuration not found")
+        return
+
+    client = TMDBClient(
+        read_access_token=tmdb_config.read_access_token,
+        base_url=tmdb_config.base_url
+    )
+
+    logger.info("Testing TMDB connection...")
+    try:
+        result = client.get_now_playing_movies(page=1)
+        if result:
+            logger.info("✓ TMDB API connection successful")
+            sys.exit(0)
+        else:
+            logger.error("✗ TMDB API connection failed")
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"✗ TMDB API connection error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    test_connection()
