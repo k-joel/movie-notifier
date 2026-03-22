@@ -7,16 +7,17 @@ import os
 import sys
 import subprocess
 
+
 def main():
     # Print header
     print()
     print("=" * 60)
     print(" MOVIE NOTIFIER SETUP")
     print("=" * 60)
-    
+
     print()
     print("This script will help you set up the Movie Notifier application.")
-    
+
     # Check Python version
     print()
     print("[1] Checking Python version...")
@@ -24,56 +25,66 @@ def main():
         print(f"  ERROR: Python 3.7+ required. Current: {sys.version}")
         return False
     else:
-        print(f"  OK: Python {sys.version_info.major}.{sys.version_info.minor} detected")
-    
+        print(
+            f"  OK: Python {sys.version_info.major}.{sys.version_info.minor} detected")
+
     # Install dependencies
     print()
     print("[2] Installing dependencies...")
     requirements_file = "requirements.txt"
     if os.path.exists(requirements_file):
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", requirements_file])
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-r", requirements_file])
             print("  OK: Dependencies installed successfully")
         except subprocess.CalledProcessError as e:
             print(f"  WARNING: Failed to install dependencies: {e}")
             print("  You can try manually: pip install -r requirements.txt")
+            # Continue setup even if dependencies fail (like install.bat)
     else:
         print(f"  ERROR: Requirements file not found: {requirements_file}")
         return False
-    
+
     # Create directories
     print()
     print("[3] Creating directories...")
-    directories = ["config", "data", "logs"]
+    directories = ["config", "data", "logs", "scripts"]
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
             print(f"  OK: Created directory: {directory}")
         else:
             print(f"  OK: Directory already exists: {directory}")
-    
+
     # Check if config file exists
     print()
     print("[4] Checking configuration...")
     config_file = "config/config.yaml"
+    config_example = "config/config.yaml.example"
     if os.path.exists(config_file):
         print(f"  OK: Configuration file already exists: {config_file}")
     else:
         print(f"  WARNING: Configuration file not found: {config_file}")
-        print("  Please edit config/config.yaml with your API keys and email settings.")
-    
+        if os.path.exists(config_example):
+            print(f"  You can copy {config_example} to {config_file}")
+            print("  and update it with your API keys and email settings.")
+        else:
+            print(
+                "  Please create config/config.yaml with your API keys and email settings.")
+
     # Check scripts
     print()
     print("[5] Checking scripts...")
     scripts_dir = "scripts"
-    required_scripts = ["tmdb_client.py", "config_manager.py", "email_notifier.py", "movie_notifier.py"]
-    
+    required_scripts = ["tmdb_client.py", "config_manager.py",
+                        "email_notifier.py", "movie_notifier.py"]
+
     if os.path.exists(scripts_dir):
         missing = []
         for script in required_scripts:
             if not os.path.exists(os.path.join(scripts_dir, script)):
                 missing.append(script)
-        
+
         if missing:
             print(f"  ERROR: Missing scripts: {', '.join(missing)}")
             return False
@@ -82,13 +93,13 @@ def main():
     else:
         print(f"  ERROR: Scripts directory not found: {scripts_dir}")
         return False
-    
+
     # Success message
     print()
     print("=" * 60)
     print(" SETUP COMPLETE")
     print("=" * 60)
-    
+
     # Next steps
     print()
     print("NEXT STEPS:")
@@ -124,8 +135,9 @@ def main():
     print("  python scripts/movie_notifier.py --test")
     print("  python scripts/movie_notifier.py --once")
     print("  python scripts/movie_notifier.py --schedule")
-    
+
     return True
+
 
 if __name__ == "__main__":
     try:

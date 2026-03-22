@@ -149,3 +149,4 @@ cython_debug/
 logs/
 data/
 config/config.yaml
+config/people.yaml
