@@ -145,6 +145,9 @@ cython_debug/
 # VS Code
 .vscode/
 
+# Kilo Code
+.kilo
+
 # Project specific
 logs/
 data/
