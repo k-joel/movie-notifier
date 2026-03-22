@@ -128,20 +128,6 @@ run_movie_notifier.bat --once
 ./run_movie_notifier.sh --once
 ```
 
-## 📅 Scheduling with AionUI Cron
-
-A cron job has been set up to run daily at 9:00 AM. The cron job will:
-- Execute the movie notifier
-- Send notifications for new releases
-- Log results to the conversation
-
-**Cron Job Details:**
-- **Name**: Movie Release Notifier
-- **Schedule**: Every day at 9:00 AM
-- **ID**: `cron_aedd0c33`
-
-To modify or check the cron job, use the AionUI cron skill commands.
-
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -211,12 +197,6 @@ Use n8n's scheduling features instead of the built-in cron.
 ## 📄 License
 
 This project is provided as-is for personal use. TMDB API usage is subject to TMDB's terms of service.
-
-## 🙏 Acknowledgments
-
-- [The Movie Database (TMDB)](https://www.themoviedb.org/) for their excellent API
-- Python community for the amazing libraries
-- AionUI for the cron scheduling capability
 
 ## 📞 Support
 
