@@ -8,6 +8,7 @@ from email_notifier import EmailNotifier
 from people_manager import PeopleManager, PersonConfig
 from config_manager import ConfigManager
 from tmdb_client import TMDBClient
+from scheduler import Scheduler, setup_scheduled_task, remove_scheduled_task
 import logging
 import logging.handlers
 import sys
@@ -15,9 +16,6 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import time
-
-# Add scripts directory to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
 class MovieNotifier:
@@ -230,12 +228,15 @@ class MovieNotifier:
         # Check if it's time to check this person
         if person.last_checked:
             time_since_last_check = datetime.now() - person.last_checked
+            hours_since_check = time_since_last_check.total_seconds() / 3600
 
             # Get notification config
             notification_config = self.config_manager.get_notification_config()
-            if notification_config and time_since_last_check.days < notification_config.check_interval_days:
+            interval_hours = (
+                notification_config.check_interval_days * 24) if notification_config else 24
+            if hours_since_check < interval_hours:
                 logging.debug(
-                    f"Skipping {person.name} - checked {time_since_last_check.days} days ago")
+                    f"Skipping {person.name} - checked {hours_since_check:.1f} hours ago")
                 return notifications
 
         # Check for movies
@@ -322,13 +323,27 @@ class MovieNotifier:
 
         return self.run_check()
 
-    def run_scheduled(self, interval_hours: int = 24):
+    def run_scheduled(self, interval_hours: int = 24, use_os_scheduler: bool = True):
         """
         Run the notifier on a schedule
 
         Args:
             interval_hours: Hours between checks
+            use_os_scheduler: If True, use OS-native scheduler (cron/Task Scheduler).
+                            If False, use built-in sleep loop.
         """
+        if use_os_scheduler:
+            script_path = os.path.join(os.path.dirname(__file__), "movie_notifier.py")
+            success = setup_scheduled_task(interval_hours, script_path)
+            if success:
+                logging.info(
+                    f"Task scheduled using OS scheduler. Will run every {interval_hours} hours.")
+                logging.info("The scheduled task will run independently. You can close this process.")
+            else:
+                logging.warning("Failed to setup OS scheduler, falling back to built-in loop")
+                use_os_scheduler = False
+            return
+
         if not self.initialize_components():
             logging.error("Failed to initialize components. Exiting.")
             return
@@ -338,10 +353,7 @@ class MovieNotifier:
 
         try:
             while True:
-                # Run check
                 self.run_check()
-
-                # Wait for next check
                 logging.info(f"Next check in {interval_hours} hours...")
                 time.sleep(interval_hours * 3600)
 
@@ -406,6 +418,8 @@ def main():
                         help="Run once and exit")
     parser.add_argument("--schedule", "-s", action="store_true",
                         help="Run on a schedule (default: every 24 hours)")
+    parser.add_argument("--native", "-n", dest="native_schedule", action="store_true",
+                        help="Use OS-native scheduler (cron on Linux, Task Scheduler on Windows)")
     parser.add_argument("--interval", "-i", type=int, default=24,
                         help="Hours between checks when running on schedule")
     parser.add_argument("--test", "-t", action="store_true",
@@ -428,7 +442,7 @@ def main():
     elif args.once:
         notifier.run_once()
     elif args.schedule:
-        notifier.run_scheduled(args.interval)
+        notifier.run_scheduled(args.interval, use_os_scheduler=args.native_schedule)
     else:
         # Default: run once
         notifier.run_once()

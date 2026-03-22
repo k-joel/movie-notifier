@@ -45,11 +45,13 @@ class TMDBClient:
         """
         url = f"{self.base_url}/{endpoint}"
         try:
-            response = self.session.get(url, params=params)
+            response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error making request to {endpoint}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
             return None
 
     def get_person_details(self, person_id: int) -> Optional[Dict]:
