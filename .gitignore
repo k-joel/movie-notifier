@@ -149,7 +149,5 @@ cython_debug/
 .kilo
 
 # Project specific
+config/
 logs/
-data/
-config/config.yaml
-config/people.yaml

@@ -48,7 +48,7 @@ def main():
     # Create directories
     print()
     print("[3] Creating directories...")
-    directories = ["config", "data", "logs", "scripts"]
+    directories = ["config", "logs", "scripts"]
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)

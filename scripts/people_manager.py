@@ -29,20 +29,7 @@ class PersonConfig:
     name: str
     notify_for: List[str]  # ["acting"], ["directing"], or both
     last_checked: Optional[datetime] = None
-    last_notified_movies: List[int] = field(default_factory=list)
-
-    @property
-    def is_actor(self) -> bool:
-        """Check if person is an actor (based on notify_for)"""
-        return any(
-            role.lower() in ["acting", "actor", "actress"]
-            for role in self.notify_for
-        )
-
-    @property
-    def is_director(self) -> bool:
-        """Check if person is a director (based on notify_for)"""
-        return "directing" in [r.lower() for r in self.notify_for]
+    last_notified_releases: List[int] = field(default_factory=list)
 
 
 class PeopleManager:
@@ -82,10 +69,26 @@ class PeopleManager:
             persons_data = self.people_data.get('tracked_people', [])
             self.persons = []
             for person_data in persons_data:
+                # Parse last_checked timestamp if present
+                last_checked = None
+                last_checked_str = person_data.get('last_checked')
+                if last_checked_str:
+                    try:
+                        last_checked = datetime.fromisoformat(last_checked_str)
+                    except (ValueError, TypeError):
+                        logger.warning(
+                            f"Invalid last_checked timestamp for {person_data.get('name')}: {last_checked_str}")
+
+                # Load last_notified_releases
+                last_notified_releases = person_data.get(
+                    'last_notified_releases', [])
+
                 person = PersonConfig(
                     id=person_data.get('id'),
                     name=person_data.get('name', ''),
-                    notify_for=person_data.get('notify_for', ['acting'])
+                    notify_for=person_data.get('notify_for', ['acting']),
+                    last_checked=last_checked,
+                    last_notified_releases=last_notified_releases
                 )
                 self.persons.append(person)
 
@@ -126,8 +129,8 @@ class PeopleManager:
                 }
                 if person.last_checked:
                     person_data['last_checked'] = person.last_checked.isoformat()
-                if person.last_notified_movies:
-                    person_data['last_notified_movies'] = person.last_notified_movies
+                if person.last_notified_releases:
+                    person_data['last_notified_releases'] = person.last_notified_releases
                 persons_data.append(person_data)
 
             # Update people data
@@ -228,41 +231,41 @@ class PeopleManager:
             return True
         return False
 
-    def add_notified_movie(self, person_id: int, movie_id: int) -> bool:
+    def add_notified_release(self, person_id: int, release_id: int) -> bool:
         """
-        Add a movie to the list of notified movies for a person
+        Add a release to the list of notified releases for a person
 
         Args:
             person_id: TMDB person ID
-            movie_id: TMDB movie ID
+            release_id: TMDB release ID (movie or TV show)
 
         Returns:
             True if added successfully, False otherwise
         """
         person = self.get_person_by_id(person_id)
         if person:
-            if movie_id not in person.last_notified_movies:
-                person.last_notified_movies.append(movie_id)
-                # Keep only the last 100 movies to prevent list from growing too large
-                if len(person.last_notified_movies) > 100:
-                    person.last_notified_movies = person.last_notified_movies[-100:]
+            if release_id not in person.last_notified_releases:
+                person.last_notified_releases.append(release_id)
+                # Keep only the last 100 releases to prevent list from growing too large
+                if len(person.last_notified_releases) > 100:
+                    person.last_notified_releases = person.last_notified_releases[-100:]
             return True
         return False
 
-    def is_movie_notified(self, person_id: int, movie_id: int) -> bool:
+    def is_release_notified(self, person_id: int, release_id: int) -> bool:
         """
-        Check if a movie has already been notified for a person
+        Check if a release has already been notified for a person
 
         Args:
             person_id: TMDB person ID
-            movie_id: TMDB movie ID
+            release_id: TMDB release ID (movie or TV show)
 
         Returns:
-            True if movie has been notified, False otherwise
+            True if release has been notified, False otherwise
         """
         person = self.get_person_by_id(person_id)
         if person:
-            return movie_id in person.last_notified_movies
+            return release_id in person.last_notified_releases
         return False
 
     def get_all_persons(self) -> List[PersonConfig]:
@@ -273,24 +276,6 @@ class PeopleManager:
             List of PersonConfig objects
         """
         return self.persons
-
-    def get_actors(self) -> List[PersonConfig]:
-        """
-        Get all persons who are actors (based on notify_for)
-
-        Returns:
-            List of PersonConfig objects for actors
-        """
-        return [person for person in self.persons if person.is_actor]
-
-    def get_directors(self) -> List[PersonConfig]:
-        """
-        Get all persons who are directors (based on notify_for)
-
-        Returns:
-            List of PersonConfig objects for directors
-        """
-        return [person for person in self.persons if person.is_director]
 
     def load_available_roles(self, tmdb_client: 'TMDBClient') -> bool:
         """

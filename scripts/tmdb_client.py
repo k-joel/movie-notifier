@@ -140,20 +140,6 @@ class TMDBClient:
         params = {"page": page, "region": region}
         return self._make_request("movie/now_playing", params)
 
-    def get_upcoming_movies(self, page: int = 1, region: str = "US") -> Optional[Dict]:
-        """
-        Get upcoming movies
-
-        Args:
-            page: Page number
-            region: Region code (ISO 3166-1 alpha-2)
-
-        Returns:
-            Upcoming movies or None if error
-        """
-        params = {"page": page, "region": region}
-        return self._make_request("movie/upcoming", params)
-
     def search_person(self, query: str, page: int = 1) -> Optional[Dict]:
         """
         Search for a person by name
@@ -167,18 +153,6 @@ class TMDBClient:
         """
         params = {"query": query, "page": page}
         return self._make_request("search/person", params)
-
-    def discover_movies(self, params: Dict) -> Optional[Dict]:
-        """
-        Discover movies with various filters
-
-        Args:
-            params: Discovery parameters
-
-        Returns:
-            Discovered movies or None if error
-        """
-        return self._make_request("discover/movie", params)
 
     def get_recent_movies_for_person(self, person_id: int, days_back: int = 30) -> List[Dict]:
         """

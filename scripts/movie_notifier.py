@@ -21,20 +21,23 @@ from typing import Dict, List, Optional
 class MovieNotifier:
     """Main orchestrator for movie notifications"""
 
-    def __init__(self, config_path: str = "config/config.yaml", console_mode: bool = False):
+    def __init__(self, config_path: str = "config/config.yaml", send_email: bool = False,
+                 force_notify: bool = False):
         """
         Initialize movie notifier
 
         Args:
             config_path: Path to configuration file
-            console_mode: If True, output notifications to console instead of sending emails
+            send_email: If True, send email notifications; otherwise just dump to console
+            force_notify: If True, ignore last_checked timestamp and last_notified_releases (for testing)
         """
         self.config_path = config_path
         self.config_manager = ConfigManager(config_path)
         self.people_manager = PeopleManager("config/people.yaml")
         self.tmdb_client = None
         self.email_notifier = None
-        self.console_mode = console_mode
+        self.send_email = send_email
+        self.force_notify = force_notify
         self.setup_logging()
 
     def setup_logging(self):
@@ -229,6 +232,7 @@ class MovieNotifier:
 
         # First pass: filter movies based on credit type and department
         filtered = []
+        already_notified_count = 0
         for movie in movies:
             credit_type = movie.get("credit_type", "")
             # Use department for crew filtering (e.g., "Directing", "Writing", "Production")
@@ -255,8 +259,17 @@ class MovieNotifier:
                         should_include = True
                         break
 
-            if should_include and not self.people_manager.is_movie_notified(person.id, movie["id"]):
-                filtered.append(movie)
+            # Check if already notified (unless force_notify is enabled)
+            if should_include:
+                if self.force_notify or not self.people_manager.is_release_notified(person.id, movie["id"]):
+                    filtered.append(movie)
+                else:
+                    already_notified_count += 1
+
+        # Log filtered count info (only when not using force_notify)
+        if not self.force_notify and already_notified_count > 0:
+            logging.info(
+                f"Filtered out {already_notified_count} already notified releases for {person.name}")
 
         # Second pass: deduplicate by movie ID, combining departments
         deduplicated = {}
@@ -286,7 +299,7 @@ class MovieNotifier:
         logging.debug(f"Filtered movies count after dedup: {len(result)}")
         return result
 
-    def check_person_movies(self, person: PersonConfig) -> Dict[str, List[Dict]]:
+    def check_person_releases(self, person: PersonConfig) -> Dict[str, List[Dict]]:
         """Check for new movies and TV shows for a specific person."""
         if self.tmdb_client is None:
             logging.error(
@@ -337,8 +350,8 @@ class MovieNotifier:
         """
         notifications = []
 
-        # Check if it's time to check this person
-        if person.last_checked:
+        # Check if it's time to check this person (unless force_notify is set)
+        if not self.force_notify and person.last_checked:
             time_since_last_check = datetime.now() - person.last_checked
             hours_since_check = time_since_last_check.total_seconds() / 3600
 
@@ -347,20 +360,20 @@ class MovieNotifier:
             interval_hours = (
                 notification_config.check_interval_days * 24) if notification_config else 24
             if hours_since_check < interval_hours:
-                logging.debug(
-                    f"Skipping {person.name} - checked {hours_since_check:.1f} hours ago")
+                logging.info(
+                    f"Skipping {person.name} - checked {hours_since_check:.2f} hours ago (interval: {interval_hours}h)")
                 return notifications
 
-        # Check for movies
-        movies_by_type = self.check_person_movies(person)
+        # Check for releases
+        releases_by_type = self.check_person_releases(person)
 
-        # Prepare notifications for each movie type
-        for movie_type, movies in movies_by_type.items():
-            if movies:
+        # Prepare notifications for each release type
+        for release_type, releases in releases_by_type.items():
+            if releases:
                 notifications.append({
                     "person_name": person.name,
-                    "movies": movies,
-                    "notification_type": movie_type,
+                    "movies": releases,
+                    "notification_type": release_type,
                     "person_id": person.id
                 })
 
@@ -371,7 +384,7 @@ class MovieNotifier:
         # Mark movies as notified in configuration
         for notification in notifications:
             for movie in notification["movies"]:
-                self.people_manager.add_notified_movie(
+                self.people_manager.add_notified_release(
                     notification["person_id"], movie["id"])
 
         return notifications
@@ -407,20 +420,28 @@ class MovieNotifier:
         # Send notifications
         if all_notifications:
             logging.info(f"Sending {len(all_notifications)} notifications")
-            if self.console_mode:
-                results = self.send_console_notification(all_notifications)
-            else:
+            # Always dump notifications to console
+            console_results = self.send_console_notification(all_notifications)
+
+            # Optionally send email
+            if self.send_email:
                 if self.email_notifier is None:
                     logging.error(
                         "Email notifier not initialized. Call initialize_components() first.")
                     return False
-                results = self.email_notifier.send_batch_notifications(
+                email_results = self.email_notifier.send_batch_notifications(
                     all_notifications)
-
-            # Log results
-            success_count = sum(1 for success in results.values() if success)
-            logging.info(
-                f"Notifications sent: {success_count}/{len(results)} successful")
+                # Log email results
+                success_count = sum(
+                    1 for success in email_results.values() if success)
+                logging.info(
+                    f"Email notifications sent: {success_count}/{len(email_results)} successful")
+            else:
+                # Log console results
+                success_count = sum(
+                    1 for success in console_results.values() if success)
+                logging.info(
+                    f"Console output: {success_count}/{len(console_results)} successful")
         else:
             logging.info("No new releases found for notification")
 
@@ -494,7 +515,7 @@ def main():
     parser.add_argument("--config", "-c", default="config/config.yaml",
                         help="Path to configuration file")
     parser.add_argument("--once", "-o", action="store_true",
-                        help="Run once and exit")
+                        help="Run once and exit (default)")
     parser.add_argument("--schedule", "-s", action="store_true",
                         help="Run on a schedule (default: every 24 hours)")
     parser.add_argument("--native", "-n", dest="native_schedule", action="store_true",
@@ -503,22 +524,23 @@ def main():
                         help="Hours between checks when running on schedule")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable verbose logging")
-    parser.add_argument("--console", dest="console", action="store_true",
-                        help="Output notifications to console instead of sending emails")
+    parser.add_argument("--send-email", "-e", dest="send_email", action="store_true",
+                        help="Send email notifications (default: just dump to console)")
+    parser.add_argument("--force-notify", "-f", action="store_true",
+                        help="Ignore last_checked timestamp and last_notified_releases (for testing)")
 
     args = parser.parse_args()
 
     # Create notifier
-    notifier = MovieNotifier(args.config, console_mode=args.console)
+    notifier = MovieNotifier(args.config, send_email=args.send_email,
+                             force_notify=args.force_notify)
 
     # Set logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Run based on arguments
-    if args.once:
-        notifier.run_once()
-    elif args.schedule:
+    if args.schedule:
         notifier.run_scheduled(
             args.interval, use_os_scheduler=args.native_schedule)
     else:
