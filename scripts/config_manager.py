@@ -85,7 +85,7 @@ class TMDBConfig:
 @dataclass
 class NotificationConfig:
     """Notification settings"""
-    check_interval_days: int
+    check_interval: str  # Cron expression (e.g., "0 0 * * *" for daily)
     look_ahead_days: int
     include_upcoming: bool
     include_now_playing: bool
@@ -157,8 +157,8 @@ class ConfigManager:
             # Load notification configuration
             notification_data = self.config_data.get('notifications', {})
             self.notification_config = NotificationConfig(
-                check_interval_days=notification_data.get(
-                    'check_interval_days', 1),
+                check_interval=notification_data.get(
+                    'check_interval', "0 0 * * *"),
                 look_ahead_days=notification_data.get('look_ahead_days', 30),
                 include_upcoming=notification_data.get(
                     'include_upcoming', True),
@@ -364,14 +364,15 @@ def interactive_setup() -> bool:
     # Notification Configuration
     print("\n--- Notification Settings ---")
     notification_defaults = {
-        'check_interval_days': manager.config_data.get('notifications', {}).get('check_interval_days', 1),
+        'check_interval': manager.config_data.get('notifications', {}).get('check_interval', "0 0 * * *"),
         'look_ahead_days': manager.config_data.get('notifications', {}).get('look_ahead_days', 30),
         'include_upcoming': manager.config_data.get('notifications', {}).get('include_upcoming', True),
         'include_now_playing': manager.config_data.get('notifications', {}).get('include_now_playing', True)
     }
 
-    check_interval_days = prompt_with_default(
-        "Enter check interval (days)", notification_defaults['check_interval_days'], int)
+    check_interval = prompt_with_default(
+        "Enter check interval (cron format, e.g., '0 0 * * *' for daily)",
+        notification_defaults['check_interval'], str)
     look_ahead_days = prompt_with_default(
         "Enter look ahead days", notification_defaults['look_ahead_days'], int)
     include_upcoming = prompt_with_default(
@@ -381,7 +382,7 @@ def interactive_setup() -> bool:
 
     if 'notifications' not in manager.config_data:
         manager.config_data['notifications'] = {}
-    manager.config_data['notifications']['check_interval_days'] = check_interval_days
+    manager.config_data['notifications']['check_interval'] = check_interval
     manager.config_data['notifications']['look_ahead_days'] = look_ahead_days
     manager.config_data['notifications']['include_upcoming'] = include_upcoming
     manager.config_data['notifications']['include_now_playing'] = include_now_playing

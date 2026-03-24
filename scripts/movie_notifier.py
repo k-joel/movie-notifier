@@ -8,7 +8,7 @@ from email_notifier import EmailNotifier
 from people_manager import PeopleManager, PersonConfig
 from config_manager import ConfigManager
 from tmdb_client import TMDBClient
-from scheduler import Scheduler, setup_scheduled_task, remove_scheduled_task
+from scheduler import Scheduler, setup_scheduled_task, cron_to_minutes
 import logging
 import logging.handlers
 import sys
@@ -22,7 +22,7 @@ class MovieNotifier:
     """Main orchestrator for movie notifications"""
 
     def __init__(self, config_path: str = "config/config.yaml", send_email: bool = False,
-                 force_notify: bool = False):
+                 force_notify: bool = False, verbose: bool = False):
         """
         Initialize movie notifier
 
@@ -30,6 +30,7 @@ class MovieNotifier:
             config_path: Path to configuration file
             send_email: If True, send email notifications; otherwise just dump to console
             force_notify: If True, ignore last_checked timestamp and last_notified_releases (for testing)
+            verbose: Enable verbose logging (DEBUG level)
         """
         self.config_path = config_path
         self.config_manager = ConfigManager(config_path)
@@ -38,7 +39,12 @@ class MovieNotifier:
         self.email_notifier = None
         self.send_email = send_email
         self.force_notify = force_notify
+        self.verbose = verbose
         self.setup_logging()
+
+        # Set logging level based on verbose flag
+        if verbose:
+            logging.getLogger().setLevel(logging.DEBUG)
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -50,7 +56,7 @@ class MovieNotifier:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.StreamHandler(sys.stdout),
-                    logging.FileHandler('movie_notifier.log')
+                    logging.FileHandler('movie_notifier.log', encoding='utf-8')
                 ]
             )
             return
@@ -63,7 +69,7 @@ class MovieNotifier:
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.StreamHandler(sys.stdout),
-                    logging.FileHandler('movie_notifier.log')
+                    logging.FileHandler('movie_notifier.log', encoding='utf-8')
                 ]
             )
             return
@@ -77,8 +83,12 @@ class MovieNotifier:
         # Clear existing handlers
         logger.handlers.clear()
 
-        # Console handler
+        # Console handler - create handler first, then reconfigure the stream
         console_handler = logging.StreamHandler(sys.stdout)
+        # Reconfigure stdout to use UTF-8 encoding
+        if hasattr(console_handler.stream, 'reconfigure'):
+            console_handler.stream.reconfigure(  # type: ignore
+                encoding='utf-8')
         console_handler.setLevel(log_level)
         console_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -95,7 +105,8 @@ class MovieNotifier:
             file_handler = logging.handlers.RotatingFileHandler(
                 log_config.file,
                 maxBytes=log_config.max_size_mb * 1024 * 1024,
-                backupCount=log_config.backup_count
+                backupCount=log_config.backup_count,
+                encoding='utf-8'
             )
             file_handler.setLevel(log_level)
             file_formatter = logging.Formatter(
@@ -317,7 +328,7 @@ class MovieNotifier:
             if person.notify_for:
                 recent_movies = self.tmdb_client.get_recent_movies_for_person(
                     person.id,
-                    days_back=notification_config.check_interval_days
+                    days_back=notification_config.look_ahead_days
                 )
                 movies_by_type["new_release"] = self._filter_movies_by_credit_type(
                     recent_movies, person)
@@ -353,15 +364,19 @@ class MovieNotifier:
         # Check if it's time to check this person (unless force_notify is set)
         if not self.force_notify and person.last_checked:
             time_since_last_check = datetime.now() - person.last_checked
-            hours_since_check = time_since_last_check.total_seconds() / 3600
+            minutes_since_check = time_since_last_check.total_seconds() / 60
 
             # Get notification config
             notification_config = self.config_manager.get_notification_config()
-            interval_hours = (
-                notification_config.check_interval_days * 24) if notification_config else 24
-            if hours_since_check < interval_hours:
+            # Parse cron interval to determine if we should skip
+            interval_minutes = 1440  # Default 24 hours
+            if notification_config and notification_config.check_interval:
+                interval_minutes = cron_to_minutes(
+                    notification_config.check_interval)
+
+            if minutes_since_check < interval_minutes:
                 logging.info(
-                    f"Skipping {person.name} - checked {hours_since_check:.2f} hours ago (interval: {interval_hours}h)")
+                    f"Skipping {person.name} - checked {minutes_since_check:.2f} minutes ago (interval: {interval_minutes}m)")
                 return notifications
 
         # Check for releases
@@ -463,47 +478,68 @@ class MovieNotifier:
 
         return self.run_check()
 
-    def run_scheduled(self, interval_hours: int = 24, use_os_scheduler: bool = True):
+    def run_scheduled(self, cron_interval: Optional[str] = None):
         """
-        Run the notifier on a schedule
+        Run the notifier on a schedule using built-in sleep loop
 
         Args:
-            interval_hours: Hours between checks
-            use_os_scheduler: If True, use OS-native scheduler (cron/Task Scheduler).
-                            If False, use built-in sleep loop.
+            cron_interval: Cron expression for schedule (e.g., "0 0 * * *" for daily).
+                          If None, uses config value.
         """
-        if use_os_scheduler:
-            script_path = os.path.join(
-                os.path.dirname(__file__), "movie_notifier.py")
-            success = setup_scheduled_task(interval_hours, script_path)
-            if success:
-                logging.info(
-                    f"Task scheduled using OS scheduler. Will run every {interval_hours} hours.")
-                logging.info(
-                    "The scheduled task will run independently. You can close this process.")
-            else:
-                logging.warning(
-                    "Failed to setup OS scheduler, falling back to built-in loop")
-                use_os_scheduler = False
-            return
+        # Get cron interval from config if not provided
+        if cron_interval is None:
+            notification_config = self.config_manager.get_notification_config()
+            cron_interval = notification_config.check_interval if notification_config else "0 0 * * *"
 
         if not self.initialize_components():
             logging.error("Failed to initialize components. Exiting.")
             return
 
         logging.info(
-            f"Starting scheduled movie notifier (checking every {interval_hours} hours)")
+            f"Starting scheduled movie notifier with cron: {cron_interval}")
+
+        # Get interval in minutes from cron for fallback loop
+        interval_minutes = cron_to_minutes(cron_interval)
 
         try:
             while True:
                 self.run_check()
-                logging.info(f"Next check in {interval_hours} hours...")
-                time.sleep(interval_hours * 3600)
+                logging.info(f"Next check in {interval_minutes} minutes...")
+                time.sleep(interval_minutes * 60)
 
         except KeyboardInterrupt:
             logging.info("Movie notifier stopped by user")
         except Exception as e:
             logging.error(f"Error in scheduled run: {e}")
+
+    def run_scheduled_native(self, cron_interval: Optional[str] = None):
+        """
+        Run the notifier using OS-native scheduler (cron on Linux, Task Scheduler on Windows)
+
+        Args:
+            cron_interval: Cron expression for schedule (e.g., "0 0 * * *" for daily).
+                          If None, uses config value.
+        """
+        # Get cron interval from config if not provided
+        if cron_interval is None:
+            notification_config = self.config_manager.get_notification_config()
+            cron_interval = notification_config.check_interval if notification_config else "0 0 * * *"
+
+        script_path = os.path.join(
+            os.path.dirname(__file__), "movie_notifier.py")
+        success = setup_scheduled_task(
+            cron_interval, script_path,
+            send_email=self.send_email, verbose=self.verbose, force_notify=self.force_notify)
+        if success:
+            logging.info(
+                f"Task scheduled using OS scheduler with cron: {cron_interval}")
+            logging.info(
+                "The scheduled task will run independently. You can close this process.")
+        else:
+            logging.warning(
+                "Failed to setup OS scheduler, falling back to built-in loop")
+            # Fall back to built-in loop
+            self.run_scheduled(cron_interval)
 
 
 def main():
@@ -518,31 +554,40 @@ def main():
                         help="Run once and exit (default)")
     parser.add_argument("--schedule", "-s", action="store_true",
                         help="Run on a schedule (default: every 24 hours)")
-    parser.add_argument("--native", "-n", dest="native_schedule", action="store_true",
+    parser.add_argument("--schedule-native", "-n", dest="schedule_native", action="store_true",
                         help="Use OS-native scheduler (cron on Linux, Task Scheduler on Windows)")
-    parser.add_argument("--interval", "-i", type=int, default=24,
-                        help="Hours between checks when running on schedule")
+    parser.add_argument("--interval", "-i", type=str, default=None,
+                        help="Cron expression for schedule (e.g., '0 0 * * *' for daily)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable verbose logging")
     parser.add_argument("--send-email", "-e", dest="send_email", action="store_true",
                         help="Send email notifications (default: just dump to console)")
     parser.add_argument("--force-notify", "-f", action="store_true",
                         help="Ignore last_checked timestamp and last_notified_releases (for testing)")
+    parser.add_argument("--schedule-remove", "-r", dest="schedule_remove", action="store_true",
+                        help="Remove the scheduled task")
 
     args = parser.parse_args()
 
     # Create notifier
     notifier = MovieNotifier(args.config, send_email=args.send_email,
-                             force_notify=args.force_notify)
+                             force_notify=args.force_notify, verbose=args.verbose)
 
-    # Set logging level
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    # Handle remove schedule - doesn't need --schedule or --schedule-native
+    if args.schedule_remove:
+        from scheduler import remove_scheduled_task
+        success = remove_scheduled_task()
+        if success:
+            print("Scheduled task removed successfully.")
+        else:
+            print("Failed to remove scheduled task. It may not exist.")
+        return
 
     # Run based on arguments
-    if args.schedule:
-        notifier.run_scheduled(
-            args.interval, use_os_scheduler=args.native_schedule)
+    if args.schedule_native:
+        notifier.run_scheduled_native(cron_interval=args.interval)
+    elif args.schedule:
+        notifier.run_scheduled(cron_interval=args.interval)
     else:
         # Default: run once
         notifier.run_once()

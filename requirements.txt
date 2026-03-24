@@ -6,3 +6,4 @@ schedule>=1.2.0
 pytz>=2023.3
 tzlocal>=5.0.1
 colorama>=0.4.6  # For colored console output
+cron_converter>=1.0.0  # For parsing cron expressions
