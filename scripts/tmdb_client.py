@@ -65,17 +65,42 @@ class TMDBClient:
         """
         return self._make_request(f"person/{person_id}")
 
-    def get_person_movie_credits(self, person_id: int) -> Optional[Dict]:
+    def get_person_combined_credits(self, person_id: int) -> Optional[Dict]:
         """
-        Get movie credits for a person
+        Get combined credits for a person (both movies and TV)
 
         Args:
             person_id: TMDB person ID
 
         Returns:
-            Movie credits or None if error
+            Combined credits or None if error
         """
-        return self._make_request(f"person/{person_id}/movie_credits")
+        return self._make_request(f"person/{person_id}/combined_credits")
+
+    def get_available_roles(self) -> List[str]:
+        """
+        Get all available roles from TMDB API using the jobs endpoint.
+        This returns a list of all departments like Production, Directing, Acting, etc.
+
+        Returns:
+            List of available role/department strings
+        """
+        jobs = self._make_request("configuration/jobs")
+        if not jobs:
+            logger.warning("Failed to fetch available roles from TMDB")
+            return []
+
+        # Extract unique department names from jobs
+        departments = set()
+        for job in jobs:
+            if isinstance(job, dict) and 'department' in job:
+                departments.add(job['department'])
+
+        # Convert to lowercase for consistency
+        available_roles = sorted([d.lower() for d in departments])
+        logger.info(
+            f"Retrieved {len(available_roles)} available roles from TMDB")
+        return available_roles
 
     def get_movie_details(self, movie_id: int) -> Optional[Dict]:
         """
@@ -88,6 +113,18 @@ class TMDBClient:
             Movie details or None if error
         """
         return self._make_request(f"movie/{movie_id}")
+
+    def get_tv_details(self, tv_id: int) -> Optional[Dict]:
+        """
+        Get details for a specific TV show
+
+        Args:
+            tv_id: TMDB TV show ID
+
+        Returns:
+            TV show details or None if error
+        """
+        return self._make_request(f"tv/{tv_id}")
 
     def get_now_playing_movies(self, page: int = 1, region: str = "US") -> Optional[Dict]:
         """
@@ -145,16 +182,16 @@ class TMDBClient:
 
     def get_recent_movies_for_person(self, person_id: int, days_back: int = 30) -> List[Dict]:
         """
-        Get recent movies for a person within the specified number of days
+        Get recent movies and TV shows for a person within the specified number of days
 
         Args:
             person_id: TMDB person ID
             days_back: Number of days to look back
 
         Returns:
-            List of recent movies
+            List of recent movies/TV shows
         """
-        credits = self.get_person_movie_credits(person_id)
+        credits = self.get_person_combined_credits(person_id)
         if not credits:
             return []
 
@@ -164,68 +201,106 @@ class TMDBClient:
         # Check both cast and crew credits
         for credit_type in ["cast", "crew"]:
             if credit_type in credits:
-                for movie in credits[credit_type]:
-                    # Check if movie has a release date
-                    if movie.get("release_date"):
+                for credit in credits[credit_type]:
+                    # Check if credit has a release/first air date
+                    release_date = credit.get(
+                        "release_date") or credit.get("first_air_date")
+                    if release_date:
                         try:
-                            release_date = datetime.strptime(
-                                movie["release_date"], "%Y-%m-%d")
-                            if release_date >= cutoff_date:
-                                # Get more details about the movie
-                                movie_details = self.get_movie_details(
-                                    movie["id"])
-                                if movie_details:
-                                    movie_details["credit_type"] = credit_type
-                                    movie_details["character"] = movie.get(
-                                        "character", "")
-                                    movie_details["job"] = movie.get("job", "")
-                                    recent_movies.append(movie_details)
+                            parsed_date = datetime.strptime(
+                                release_date, "%Y-%m-%d")
+                            if parsed_date >= cutoff_date:
+                                # Get more details based on media type
+                                media_type = credit.get("media_type", "movie")
+                                if media_type == "tv":
+                                    # It's a TV show - get TV details
+                                    tv_details = self.get_tv_details(
+                                        credit["id"])
+                                    if tv_details:
+                                        tv_details["credit_type"] = credit_type
+                                        tv_details["character"] = credit.get(
+                                            "character", "")
+                                        tv_details["department"] = credit.get(
+                                            "department", "")
+                                        tv_details["media_type"] = "tv"
+                                        recent_movies.append(tv_details)
+                                else:
+                                    # It's a movie - get movie details
+                                    movie_details = self.get_movie_details(
+                                        credit["id"])
+                                    if movie_details:
+                                        movie_details["credit_type"] = credit_type
+                                        movie_details["character"] = credit.get(
+                                            "character", "")
+                                        movie_details["department"] = credit.get(
+                                            "department", "")
+                                        movie_details["media_type"] = "movie"
+                                        recent_movies.append(movie_details)
                         except ValueError:
-                            # Skip movies with invalid date format
+                            # Skip credits with invalid date format
                             continue
 
         return recent_movies
 
     def get_upcoming_movies_for_person(self, person_id: int, days_ahead: int = 30) -> List[Dict]:
         """
-        Get upcoming movies for a person within the specified number of days
+        Get upcoming movies and TV shows for a person within the specified number of days
 
         Args:
             person_id: TMDB person ID
             days_ahead: Number of days to look ahead
 
         Returns:
-            List of upcoming movies
+            List of upcoming movies/TV shows
         """
-        credits = self.get_person_movie_credits(person_id)
+        credits = self.get_person_combined_credits(person_id)
         if not credits:
             return []
 
         upcoming_movies = []
         cutoff_date = datetime.now() + timedelta(days=days_ahead)
+        today = datetime.now()
 
         # Check both cast and crew credits
         for credit_type in ["cast", "crew"]:
             if credit_type in credits:
-                for movie in credits[credit_type]:
-                    # Check if movie has a release date
-                    if movie.get("release_date"):
+                for credit in credits[credit_type]:
+                    # Check if credit has a release/first air date
+                    release_date = credit.get(
+                        "release_date") or credit.get("first_air_date")
+                    if release_date:
                         try:
-                            release_date = datetime.strptime(
-                                movie["release_date"], "%Y-%m-%d")
-                            today = datetime.now()
-                            if today <= release_date <= cutoff_date:
-                                # Get more details about the movie
-                                movie_details = self.get_movie_details(
-                                    movie["id"])
-                                if movie_details:
-                                    movie_details["credit_type"] = credit_type
-                                    movie_details["character"] = movie.get(
-                                        "character", "")
-                                    movie_details["job"] = movie.get("job", "")
-                                    upcoming_movies.append(movie_details)
+                            parsed_date = datetime.strptime(
+                                release_date, "%Y-%m-%d")
+                            if today <= parsed_date <= cutoff_date:
+                                # Get more details based on media type
+                                media_type = credit.get("media_type", "movie")
+                                if media_type == "tv":
+                                    # It's a TV show - get TV details
+                                    tv_details = self.get_tv_details(
+                                        credit["id"])
+                                    if tv_details:
+                                        tv_details["credit_type"] = credit_type
+                                        tv_details["character"] = credit.get(
+                                            "character", "")
+                                        tv_details["department"] = credit.get(
+                                            "department", "")
+                                        tv_details["media_type"] = "tv"
+                                        upcoming_movies.append(tv_details)
+                                else:
+                                    # It's a movie - get movie details
+                                    movie_details = self.get_movie_details(
+                                        credit["id"])
+                                    if movie_details:
+                                        movie_details["credit_type"] = credit_type
+                                        movie_details["character"] = credit.get(
+                                            "character", "")
+                                        movie_details["department"] = credit.get(
+                                            "department", "")
+                                        movie_details["media_type"] = "movie"
+                                        upcoming_movies.append(movie_details)
                         except ValueError:
-                            # Skip movies with invalid date format
+                            # Skip credits with invalid date format
                             continue
 
         return upcoming_movies

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Email Notifier for Movie Notifier
-Handles sending email notifications for new movie releases
+Handles sending email notifications for new movie and TV show releases
 """
 
 import smtplib
@@ -76,7 +76,7 @@ class EmailNotifier:
     def create_movie_notification_email(self, person_name: str, movies: List[Dict],
                                         notification_type: str = "new_release") -> tuple:
         """
-        Create email content for movie notifications
+        Create email content for movie/TV show notifications
 
         Args:
             person_name: Name of the actor/director
@@ -116,19 +116,28 @@ class EmailNotifier:
         </head>
         <body>
             <div class="header">
-                <h1>🎬 Movie Notification</h1>
+                <h1>🎬 Release Notification</h1>
                 <p>You're receiving this notification because you're tracking <strong>{html.escape(person_name)}</strong></p>
             </div>
             
             <div class="notification-type">
-                {notification_type.replace('_', ' ').title()} • {len(movies)} movie{'s' if len(movies) != 1 else ''}
+                {notification_type.replace('_', ' ').title()} • {len(movies)} release{'s' if len(movies) != 1 else ''}
             </div>
         """
 
-        # Add each movie
+        # Add each movie/TV show
         for movie in movies:
-            title = html.escape(movie.get('title', 'Unknown Title'))
-            release_date = movie.get('release_date', 'TBA')
+            # For TV shows, TMDB uses 'name' as the title; for movies, it uses 'title'
+            title = html.escape(movie.get('title') or movie.get(
+                'name') or 'Unknown Title')
+            # For TV shows, use first_air_date; for movies, use release_date
+            media_type = movie.get('media_type', 'movie')
+            if media_type == 'tv':
+                release_date = movie.get('first_air_date', 'TBA')
+                date_label = "First Air Date"
+            else:
+                release_date = movie.get('release_date', 'TBA')
+                date_label = "Release Date"
             overview = html.escape(
                 movie.get('overview', 'No overview available.'))
             vote_average = movie.get('vote_average', 'N/A')
@@ -142,9 +151,9 @@ class EmailNotifier:
                 if character:
                     credit_info = f"as <em>{html.escape(character)}</em>"
             elif credit_type == 'crew':
-                job = movie.get('job', '')
-                if job:
-                    credit_info = f"as <em>{html.escape(job)}</em>"
+                role = movie.get('department', '')
+                if role:
+                    credit_info = f"as <em>{html.escape(role)}</em>"
 
             # Create poster URL if available
             poster_html = ""
@@ -157,7 +166,7 @@ class EmailNotifier:
                 {poster_html}
                 <div class="movie-title">{title}</div>
                 <div class="movie-info">
-                    <span class="release-date">📅 Release Date: {release_date}</span>
+                    <span class="release-date">📅 {date_label}: {release_date}</span>
                 </div>
                 <div class="movie-info">
                     <span class="rating">⭐ Rating: {vote_average}/10</span>
@@ -181,14 +190,24 @@ class EmailNotifier:
         """
 
         # Create plain text version
-        text_body = f"Movie Notification for {person_name}"
+        text_body = f"Release Notification for {person_name}"
         text_body += "=" * 50 + ""
 
         for i, movie in enumerate(movies, 1):
-            title = movie.get('title', 'Unknown Title')
+            # For TV shows, TMDB uses 'name' as the title; for movies, it uses 'title'
+            title = movie.get('title') or movie.get('name') or 'Unknown Title'
             release_date = movie.get('release_date', 'TBA')
             overview = movie.get('overview', 'No overview available.')
             vote_average = movie.get('vote_average', 'N/A')
+
+            # Determine media type for correct date field
+            media_type = movie.get('media_type', 'movie')
+            if media_type == 'tv':
+                release_date = movie.get('first_air_date', 'TBA')
+                date_label = "First Air Date"
+            else:
+                release_date = movie.get('release_date', 'TBA')
+                date_label = "Release Date"
 
             credit_type = movie.get('credit_type', '')
             credit_info = ""
@@ -197,12 +216,12 @@ class EmailNotifier:
                 if character:
                     credit_info = f"as {character}"
             elif credit_type == 'crew':
-                job = movie.get('job', '')
-                if job:
-                    credit_info = f"as {job}"
+                role = movie.get('department', '')
+                if role:
+                    credit_info = f"as {role}"
 
             text_body += f"{i}. {title}"
-            text_body += f"   Release Date: {release_date}"
+            text_body += f"   {date_label}: {release_date}"
             text_body += f"   Rating: {vote_average}/10"
             if credit_info:
                 text_body += f"   {credit_info}"
@@ -234,7 +253,7 @@ class EmailNotifier:
             notification_type = notification['notification_type']
 
             if not movies:
-                logger.info(f"No movies to notify for {person_name}")
+                logger.info(f"No releases to notify for {person_name}")
                 results[person_name] = True
                 continue
 
@@ -247,7 +266,7 @@ class EmailNotifier:
 
             if success:
                 logger.info(
-                    f"Notification sent for {person_name}: {len(movies)} movies")
+                    f"Notification sent for {person_name}: {len(movies)} releases")
             else:
                 logger.error(f"Failed to send notification for {person_name}")
 

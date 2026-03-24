@@ -1,4 +1,4 @@
-# 🎬 Movie Notifier
+# 🎬 Movie & TV Show Notifier
 
 Get email notifications whenever your favorite actors or directors release new movies!
 

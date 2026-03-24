@@ -34,12 +34,15 @@ class PersonConfig:
     @property
     def is_actor(self) -> bool:
         """Check if person is an actor (based on notify_for)"""
-        return "acting" in self.notify_for
+        return any(
+            role.lower() in ["acting", "actor", "actress"]
+            for role in self.notify_for
+        )
 
     @property
     def is_director(self) -> bool:
         """Check if person is a director (based on notify_for)"""
-        return "directing" in self.notify_for
+        return "directing" in [r.lower() for r in self.notify_for]
 
 
 class PeopleManager:
@@ -58,6 +61,7 @@ class PeopleManager:
         self.people_path = people_path
         self.people_data: Optional[Dict] = None
         self.persons: List[PersonConfig] = []
+        self.available_roles: List[str] = []
 
     def load_people(self) -> bool:
         """
@@ -88,6 +92,9 @@ class PeopleManager:
             logger.info(
                 f"People configuration loaded successfully from {self.people_path}")
             logger.info(f"Loaded {len(self.persons)} tracked persons")
+
+            # Load available_roles from config or set empty (can be populated later)
+            self.available_roles = self.people_data.get('available_roles', [])
             return True
 
         except FileNotFoundError:
@@ -126,6 +133,9 @@ class PeopleManager:
             # Update people data
             if self.people_data:
                 self.people_data['tracked_people'] = persons_data
+                # Save available_roles if present
+                if self.available_roles:
+                    self.people_data['available_roles'] = self.available_roles
 
             # Save to file
             with open(self.people_path, 'w', encoding='utf-8') as f:
@@ -282,6 +292,38 @@ class PeopleManager:
         """
         return [person for person in self.persons if person.is_director]
 
+    def load_available_roles(self, tmdb_client: 'TMDBClient') -> bool:
+        """
+        Load available roles from TMDB API and save to configuration file.
+        This should be called if available_roles is not present in people.yaml
+
+        Args:
+            tmdb_client: TMDBClient instance for making API calls
+
+        Returns:
+            True if roles were loaded successfully, False otherwise
+        """
+        if self.available_roles:
+            logger.info("Available roles already loaded")
+            return True
+
+        logger.info("Fetching available roles from TMDB API...")
+        roles = tmdb_client.get_available_roles()
+
+        if not roles:
+            logger.warning("No roles returned from TMDB API")
+            return False
+
+        self.available_roles = roles
+        logger.info(f"Loaded {len(roles)} available roles: {roles}")
+
+        # Save to configuration file
+        if self.people_data:
+            self.people_data['available_roles'] = roles
+            return self.save_people()
+
+        return True
+
 
 def interactive_setup():
     """
@@ -393,6 +435,11 @@ def add_person_interactive(people_manager: 'PeopleManager', tmdb_client: 'TMDBCl
     print("ADD NEW PERSON")
     print("-"*60)
 
+    # Fetch available roles from TMDB if not already loaded
+    if not people_manager.available_roles:
+        print("Fetching available roles from TMDB...")
+        people_manager.load_available_roles(tmdb_client)
+
     # Get search query
     search_query = input("Enter person name to search: ").strip()
     if not search_query:
@@ -455,26 +502,16 @@ def add_person_interactive(people_manager: 'PeopleManager', tmdb_client: 'TMDBCl
             known_for_department = person_details.get(
                 'known_for_department', 'Acting')
 
-        # Determine available roles
-        available_roles = []
-        if known_for_department.lower() in ['acting', 'actor', 'actress']:
-            available_roles.append('acting')
-        if known_for_department.lower() in ['directing', 'director']:
-            available_roles.append('directing')
-
-        # Also check for writing, producing, etc.
-        if 'writing' in known_for_department.lower():
-            available_roles.append('writing')
-        if 'production' in known_for_department.lower():
-            available_roles.append('producing')
-
-        # If no specific department found, offer common options
-        if not available_roles:
-            available_roles = ['acting', 'directing', 'writing', 'producing']
+        # Use available roles from API if loaded, otherwise use defaults
+        if people_manager.available_roles:
+            role_options = people_manager.available_roles.copy()
+        else:
+            # Fallback to common roles if API call failed
+            role_options = ['acting', 'directing', 'writing', 'producing']
 
         print(f"\n{person_name} is known for: {known_for_department}")
         print("Available notification roles:")
-        for i, role in enumerate(available_roles, 1):
+        for i, role in enumerate(role_options, 1):
             print(f"  {i}. {role}")
 
         # Get role selections
@@ -484,7 +521,7 @@ def add_person_interactive(people_manager: 'PeopleManager', tmdb_client: 'TMDBCl
                 "\nSelect roles (comma-separated numbers, e.g., '1,3' or 'all' for all): ").strip().lower()
 
             if role_input == 'all':
-                selected_roles = available_roles.copy()
+                selected_roles = role_options.copy()
                 break
             elif role_input == '':
                 print("No roles selected. Using default (acting).")
@@ -496,14 +533,14 @@ def add_person_interactive(people_manager: 'PeopleManager', tmdb_client: 'TMDBCl
                         int(x.strip()) - 1 for x in role_input.split(',')]
                     valid = True
                     for idx in role_indices:
-                        if idx < 0 or idx >= len(available_roles):
+                        if idx < 0 or idx >= len(role_options):
                             print(
                                 f"Invalid selection: {idx + 1}. Please try again.")
                             valid = False
                             break
 
                     if valid:
-                        selected_roles = [available_roles[idx]
+                        selected_roles = [role_options[idx]
                                           for idx in role_indices]
                         break
                 except ValueError:

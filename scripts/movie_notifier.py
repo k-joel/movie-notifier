@@ -121,6 +121,19 @@ class MovieNotifier:
                 logging.error("Failed to load people configuration")
                 return False
 
+            # Check if available_roles is populated, if not, fetch from TMDB
+            if not self.people_manager.available_roles:
+                logging.info(
+                    "Available roles not found in config, fetching from TMDB...")
+                # Get TMDB client first
+                tmdb_config = self.config_manager.get_tmdb_config()
+                if tmdb_config and tmdb_config.read_access_token:
+                    temp_client = TMDBClient(
+                        read_access_token=tmdb_config.read_access_token,
+                        base_url=tmdb_config.base_url
+                    )
+                    self.people_manager.load_available_roles(temp_client)
+
             # Check for required read access token
             tmdb_config = self.config_manager.get_tmdb_config()
             if not tmdb_config or not tmdb_config.read_access_token or tmdb_config.read_access_token == "YOUR_TMDB_READ_ACCESS_TOKEN":
@@ -172,14 +185,31 @@ class MovieNotifier:
                 print(f"NOTIFICATION #{i + 1}")
                 print(f"Person: {person_name}")
                 print(f"Type: {movie_type}")
-                print(f"Movies ({len(movies)}):")
+                print(f"Releases ({len(movies)}):")
                 print("-" * 40)
 
                 for movie in movies:
-                    title = movie.get("title", "Unknown Title")
-                    release_date = movie.get("release_date", "Unknown Date")
-                    credit_type = movie.get("credit_type", "")
-                    print(f"  - {title} ({release_date}) [{credit_type}]")
+                    # For TV shows, TMDB uses 'name' as the title; for movies, it uses 'title'
+                    title = movie.get('title') or movie.get(
+                        'name') or 'Unknown Title'
+                    # For TV shows, use first_air_date; for movies, use release_date
+                    media_type = movie.get('media_type', 'movie')
+                    if media_type == 'tv':
+                        release_date = movie.get(
+                            'first_air_date', 'Unknown Date')
+                    else:
+                        release_date = movie.get(
+                            'release_date', 'Unknown Date')
+                    # Use departments list for crew, otherwise credit_type for cast
+                    departments = movie.get("departments", [])
+                    if departments:
+                        # Show departments as comma-separated list (e.g., "directing, writing")
+                        dept_str = ", ".join(departments)
+                        print(f"  - {title} ({release_date}) [{dept_str}]")
+                    else:
+                        # For cast (acting), show the credit_type
+                        credit_type = movie.get("credit_type", "")
+                        print(f"  - {title} ({release_date}) [{credit_type}]")
 
                 print("=" * 60 + "\n")
                 results[str(i)] = True
@@ -192,17 +222,72 @@ class MovieNotifier:
 
     def _filter_movies_by_credit_type(self, movies: List[Dict], person: PersonConfig) -> List[Dict]:
         """Filter movies based on credit type and notification preferences."""
+        # Debug: Log input movies to diagnose duplicates
+        logging.debug(f"Input movies count: {len(movies)}")
+        movie_ids = [m.get("id") for m in movies if m.get("id")]
+        logging.debug(f"Input movie IDs: {movie_ids}")
+
+        # First pass: filter movies based on credit type and department
         filtered = []
         for movie in movies:
             credit_type = movie.get("credit_type", "")
-            if (credit_type == "cast" and "acting" in person.notify_for) or \
-               (credit_type == "crew" and "directing" in person.notify_for):
-                if not self.people_manager.is_movie_notified(person.id, movie["id"]):
-                    filtered.append(movie)
-        return filtered
+            # Use department for crew filtering (e.g., "Directing", "Writing", "Production")
+            department = movie.get("department", "").lower(
+            ) if movie.get("department") else ""
+
+            # Check if this movie matches any of the notify_for roles
+            should_include = False
+
+            if credit_type == "cast":
+                # For cast (acting), check if "acting" or similar is in notify_for
+                for role in person.notify_for:
+                    if role.lower() in ["acting", "actor", "actress"]:
+                        should_include = True
+                        break
+            elif credit_type == "crew" and department:
+                # For crew, check if the department matches any notify_for role
+                # TMDB uses "Directing", "Writing", "Production" which should match
+                # "directing", "writing", "producing" in config
+                for role in person.notify_for:
+                    role_lower = role.lower()
+                    # Check department match
+                    if department == role_lower or department.startswith(role_lower):
+                        should_include = True
+                        break
+
+            if should_include and not self.people_manager.is_movie_notified(person.id, movie["id"]):
+                filtered.append(movie)
+
+        # Second pass: deduplicate by movie ID, combining departments
+        deduplicated = {}
+        for movie in filtered:
+            movie_id = movie.get("id")
+            if not movie_id:
+                continue
+
+            if movie_id not in deduplicated:
+                # First occurrence of this movie - add it
+                deduplicated[movie_id] = movie.copy()
+                # Initialize departments list with the department from this credit
+                dept = movie.get("department", "")
+                if dept:
+                    deduplicated[movie_id]["departments"] = [dept]
+                else:
+                    deduplicated[movie_id]["departments"] = []
+            else:
+                # Duplicate movie - add department to existing entry
+                dept = movie.get("department", "")
+                if dept and dept not in deduplicated[movie_id]["departments"]:
+                    deduplicated[movie_id]["departments"].append(dept)
+
+        result = list(deduplicated.values())
+
+        # Debug: Log filtered results
+        logging.debug(f"Filtered movies count after dedup: {len(result)}")
+        return result
 
     def check_person_movies(self, person: PersonConfig) -> Dict[str, List[Dict]]:
-        """Check for new movies for a specific person."""
+        """Check for new movies and TV shows for a specific person."""
         if self.tmdb_client is None:
             logging.error(
                 "TMDB client not initialized. Call initialize_components() first.")
@@ -215,7 +300,8 @@ class MovieNotifier:
             if not notification_config:
                 return movies_by_type
 
-            if "acting" in person.notify_for or "directing" in person.notify_for:
+            # Check if person has any notify_for roles configured
+            if person.notify_for:
                 recent_movies = self.tmdb_client.get_recent_movies_for_person(
                     person.id,
                     days_back=notification_config.check_interval_days
@@ -232,7 +318,7 @@ class MovieNotifier:
                         upcoming_movies, person)
 
             logging.info(f"Found {len(movies_by_type['new_release'])} new releases, "
-                         f"{len(movies_by_type['upcoming'])} upcoming movies for {person.name}")
+                         f"{len(movies_by_type['upcoming'])} upcoming releases for {person.name}")
 
         except Exception as e:
             logging.error(f"Error checking movies for {person.name}: {e}")
@@ -313,7 +399,7 @@ class MovieNotifier:
 
                 if notifications:
                     logging.info(f"Found {sum(len(n['movies']) for n in notifications)} "
-                                 f"new movies for {person.name}")
+                                 f"new releases for {person.name}")
 
             except Exception as e:
                 logging.error(f"Error processing {person.name}: {e}")
@@ -336,7 +422,7 @@ class MovieNotifier:
             logging.info(
                 f"Notifications sent: {success_count}/{len(results)} successful")
         else:
-            logging.info("No new movies found for notification")
+            logging.info("No new releases found for notification")
 
         # Save people configuration with updated timestamps
         self.people_manager.save_people()
