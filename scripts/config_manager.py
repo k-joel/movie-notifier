@@ -100,6 +100,13 @@ class LoggingConfig:
     backup_count: int
 
 
+@dataclass
+class N8NConfig:
+    """n8n integration configuration"""
+    url: str
+    api_key: str
+
+
 class ConfigManager:
     """Manages configuration loading and saving"""
 
@@ -119,6 +126,7 @@ class ConfigManager:
         self.tmdb_config: Optional[TMDBConfig] = None
         self.notification_config: Optional[NotificationConfig] = None
         self.logging_config: Optional[LoggingConfig] = None
+        self.n8n_config: Optional[N8NConfig] = None
 
     def load_config(self) -> bool:
         """
@@ -173,6 +181,13 @@ class ConfigManager:
                 file=logging_data.get('file', 'logs/movie_notifier.log'),
                 max_size_mb=logging_data.get('max_size_mb', 10),
                 backup_count=logging_data.get('backup_count', 5)
+            )
+
+            # Load n8n configuration
+            n8n_data = self.config_data.get('n8n', {})
+            self.n8n_config = N8NConfig(
+                url=n8n_data.get('url', 'http://localhost:5678'),
+                api_key=n8n_data.get('api_key', '')
             )
 
             logger.info(
@@ -250,6 +265,15 @@ class ConfigManager:
             LoggingConfig or None if not loaded
         """
         return self.logging_config
+
+    def get_n8n_config(self) -> Optional[N8NConfig]:
+        """
+        Get n8n configuration
+
+        Returns:
+            N8NConfig or None if not loaded
+        """
+        return self.n8n_config
 
     def update_config_value(self, section: str, key: str, value: Any) -> bool:
         """
@@ -411,6 +435,23 @@ def interactive_setup() -> bool:
     manager.config_data['logging']['file'] = log_file
     manager.config_data['logging']['max_size_mb'] = max_size_mb
     manager.config_data['logging']['backup_count'] = backup_count
+
+    # n8n Configuration
+    print("\n--- n8n Integration Configuration ---")
+    n8n_defaults = {
+        'url': manager.config_data.get('n8n', {}).get('url', 'http://localhost:5678'),
+        'api_key': manager.config_data.get('n8n', {}).get('api_key', '')
+    }
+
+    n8n_url = prompt_with_default(
+        "Enter n8n server URL", n8n_defaults['url'])
+    n8n_api_key = prompt_with_default(
+        "Enter n8n API key (leave empty if not using direct import)", n8n_defaults['api_key'])
+
+    if 'n8n' not in manager.config_data:
+        manager.config_data['n8n'] = {}
+    manager.config_data['n8n']['url'] = n8n_url
+    manager.config_data['n8n']['api_key'] = n8n_api_key
 
     # Save configuration
     print("\nSaving configuration...")

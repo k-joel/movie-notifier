@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 class MovieNotifier:
     """Main orchestrator for movie notifications"""
 
-    def __init__(self, config_path: str = "config/config.yaml", send_email: bool = False,
+    def __init__(self, config_path: str = "config/config.yaml", people_path: str = "config/people.yaml", send_email: bool = False,
                  force_notify: bool = False, verbose: bool = False):
         """
         Initialize movie notifier
@@ -32,9 +32,8 @@ class MovieNotifier:
             force_notify: If True, ignore last_checked timestamp and last_notified_releases (for testing)
             verbose: Enable verbose logging (DEBUG level)
         """
-        self.config_path = config_path
         self.config_manager = ConfigManager(config_path)
-        self.people_manager = PeopleManager("config/people.yaml")
+        self.people_manager = PeopleManager(people_path)
         self.tmdb_client = None
         self.email_notifier = None
         self.send_email = send_email
@@ -550,12 +549,16 @@ def main():
         description="Movie Notifier - Get email notifications for new movie releases")
     parser.add_argument("--config", "-c", default="config/config.yaml",
                         help="Path to configuration file")
+    parser.add_argument("--people", "-p", default="config/people.yaml",
+                        help="Path to people configuration file")
     parser.add_argument("--once", "-o", action="store_true",
                         help="Run once and exit (default)")
     parser.add_argument("--schedule", "-s", action="store_true",
                         help="Run on a schedule (default: every 24 hours)")
     parser.add_argument("--schedule-native", "-n", dest="schedule_native", action="store_true",
                         help="Use OS-native scheduler (cron on Linux, Task Scheduler on Windows)")
+    parser.add_argument("--schedule-remove", "-r", dest="schedule_remove", action="store_true",
+                        help="Remove the scheduled task")
     parser.add_argument("--interval", "-i", type=str, default=None,
                         help="Cron expression for schedule (e.g., '0 0 * * *' for daily)")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -564,13 +567,11 @@ def main():
                         help="Send email notifications (default: just dump to console)")
     parser.add_argument("--force-notify", "-f", action="store_true",
                         help="Ignore last_checked timestamp and last_notified_releases (for testing)")
-    parser.add_argument("--schedule-remove", "-r", dest="schedule_remove", action="store_true",
-                        help="Remove the scheduled task")
 
     args = parser.parse_args()
 
     # Create notifier
-    notifier = MovieNotifier(args.config, send_email=args.send_email,
+    notifier = MovieNotifier(args.config, args.people, send_email=args.send_email,
                              force_notify=args.force_notify, verbose=args.verbose)
 
     # Handle remove schedule - doesn't need --schedule or --schedule-native

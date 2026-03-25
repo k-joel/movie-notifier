@@ -151,3 +151,4 @@ cython_debug/
 # Project specific
 config/
 logs/
+n8n/
